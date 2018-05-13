@@ -32,46 +32,57 @@ def convert(fitfile, hdffile=None):
             try:
                 hf[field.name][i] = field.value
             except IOError: # Can't prepare for writing data (no appropriate function for conversion path)
-                if field.name == "timestamp":
+                if field.name == "timestamp":# or hf[field.name].attrs['unit'] == 'half-percent':
                     hf[field.name][i] = field.raw_value
+                elif field.value is None:
+                    logging.warning('{0.name} value is None'.format(field)) 
                 else:
                     logging.warning('IOError (conversion): {0.name}, {0.value}'.format(field))
             except KeyError: # field hasn't been added as a dataset yet
                 #TODO# if N>0, issue a warning
-                try:
-                    hf.create_dataset(field.name, (N,),
-                            dtype=field.type.name,
-                            compression='gzip', compression_opts=9)
+                #TODO# stub the logic below out into a separate method
+                if field.name == 'activity_type':
+                    logging.debug('activity type: {0}'.format(field.value))
+#                    hf.attrs.create('activity_type', field.value) # might become a problem for multi-sport...
+                else:
                     try:
-                        hf[field.name].attrs.create('unit', field.units)
-                    except TypeError as e:
-                        if field.units is None:
-                            hf[field.name].attrs.create('unit', 'None')
-                        else:
-                            raise e
-                    hf[field.name][i] = field.value
-                    logging.info('added {0.name} to dataset using type of {0.type.name} and units of {0.units}'.format(field))
-                except TypeError as e: # there's probably a better way to intercept activity_type
-                    if field.type.name == "date_time":
-                        hf.create_dataset(field.name, (N,),
-                                dtype='uint32',
+                        dtype = field.type.base_type.name
+                    except AttributeError:
+                        dtype = field.type.name
+
+                    if dtype.startswith('sint'):
+                        dtype = dtype[1:]
+#                    elif dtype == 'enum':
+#                        dtype = 'uint32'
+                    # fitparse still yields datatype of uint8 for several of the fields that contain float data, so maybe it would be more friendly to define explicit conversions for every field name, rather than trying to autodetect...
+
+                    try:
+                        hf.create_dataset(field.name, (N,), dtype=dtype,
                                 compression='gzip', compression_opts=9)
-                        hf[field.name].attrs.create('unit', 'seconds since 1989-12-31 00:00:00 UTC')
+                    except TypeError, te:
+                        logging.warning('not sure what do with type: {1} for field {0.name}'.format(field, dtype))
+                        raise(te)
+
+                    logging.warning(field.units)
+
+                    unit = field.units
+                    if unit is None:
+                        unit = 'None'
+                    elif unit == 'percent':
+                        unit = 'half-percent'
+
+                    hf[field.name].attrs.create('unit', unit)
+
+                    if field.name == 'timestamp':
                         hf[field.name][i] = field.raw_value
+                        hf[field.name].attrs.create('unit', 'seconds since 1989-12-31 00:00:00 UTC')
                         #TODO# consider revising to unix epoch
-                        logging.info('added {0.name} to dataset using type of uint32 and units of {1}'.format(field,hf[field.name].attrs.get('unit')))
-                    elif field.type.name.startswith("sint"):
-                        hf.create_dataset(field.name, (N,),
-                                dtype=field.type.name[1:],
-                                compression='gzip', compression_opts=9)
-                        hf[field.name].attrs.create('unit', field.units)
-                        hf[field.name][i] = field.value
-                        logging.info('added {0.name} to dataset using type of int8 and units of {0.units}'.format(field))
-                    elif field.type.name == "activity_type":
-                        hf.attrs.create('activity_type', field.value)
                     else:
-                        logging.warning('not sure what do with type: {0.type.name} for field {0.name}'.format(field))
-                        raise(e)
+                        logging.debug("{0.name} = {0.value}".format(field))
+                        if field.value is not None: #TODO# might be better to use a dtype that supports NaN
+                            hf[field.name][i] = field.value
+
+                    logging.info('added {0.name} to dataset using type of {1} and units of {0.units}'.format(field, dtype))
 
     hf.close()
 
